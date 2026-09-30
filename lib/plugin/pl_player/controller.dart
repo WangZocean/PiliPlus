@@ -147,6 +147,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   late DataSource dataSource;
 
+  /// 最近一次 mpv 错误日志(用于诊断试看流播放失败)
+  String? lastMpvError;
+
   Timer? _timer;
   StreamSubscription? _subForSeek;
 
@@ -818,6 +821,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
 
     assert(!isLive || seekTo == null);
+    // 试看流拒绝 Web UA+Referer, 需切换 App UA 并清空 Referer
+    final isTrial = dataSource is NetworkSource && dataSource.isTrial;
+    lastMpvError = null;
+    player.setMediaHeader(
+      userAgent: isTrial ? BrowserUa.app : BrowserUa.pc,
+      referer: isTrial ? '' : HttpString.baseUrl,
+    );
     await player.open(
       Media(
         video,
@@ -972,8 +982,14 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           _updatePlaybackState();
         }
       }),
-      if (kDebugMode)
-        stream.log.listen(((PlayerLog log) {
+      stream.log.listen(((PlayerLog log) {
+        if (log.level == 'error' ||
+            log.level == 'fatal' ||
+            (log.level == 'warn' &&
+                (log.text.contains('http') || log.text.contains('tls')))) {
+          lastMpvError = '${log.prefix}: ${log.text}';
+        }
+        if (kDebugMode) {
           if (log.level == 'error' || log.level == 'fatal') {
             Utils.reportError(
               '${log.level}: ${log.prefix}: ${log.text}\n${player.state.playlist}',
@@ -982,7 +998,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           } else {
             debugPrint(log.toString());
           }
-        })),
+        }
+      })),
       stream.error.listen((String event) {
         if (dataSource is FileSource &&
             event.startsWith("Failed to open file")) {
@@ -1014,8 +1031,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
                 // }
                 if (isBuffering.value && buffered.value == 0) {
                   SmartDialog.showToast(
-                    '视频链接打开失败，重试中',
-                    displayTime: const Duration(milliseconds: 500),
+                    '视频链接打开失败，重试中\n${lastMpvError ?? ''}',
+                    displayTime: const Duration(milliseconds: 3000),
                   );
                   refreshPlayer();
                 }

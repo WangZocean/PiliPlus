@@ -12,9 +12,13 @@ sealed class DataSource {
 }
 
 class NetworkSource extends DataSource {
+  /// 大会员画质试看流(需要 App UA 且不可走 CDN 改写)
+  final bool isTrial;
+
   NetworkSource({
     required super.videoSource,
     required super.audioSource,
+    this.isTrial = false,
   });
 }
 

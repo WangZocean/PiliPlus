@@ -37,6 +37,14 @@ List<SettingsModel> get videoSettings => [
     setKey: SettingBoxKey.p1080,
     defaultVal: true,
   ),
+  const SwitchModel(
+    title: '大会员画质试看',
+    subtitle:
+        '实验性：登录后经试看通道获取大会员画质（1080P高码率/4K/HDR等）并完整播放，不受试看时长限制。依赖官方试看策略，可能随时失效，请注意账号风险',
+    leading: Icon(Icons.hd_outlined),
+    setKey: SettingBoxKey.enableVipQaTrial,
+    defaultVal: false,
+  ),
   NormalModel(
     title: 'B站定向流量支持',
     subtitle: '若套餐含B站定向流量，则会自动使用。可查阅运营商的流量记录确认。',

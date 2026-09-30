@@ -71,6 +71,7 @@ class LoginAccount extends Account {
   @override
   late final Map<String, String> grpcHeaders = GrpcHeaders.newHeaders(
     accessKey,
+    mid,
   );
 
   @override

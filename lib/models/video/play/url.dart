@@ -268,6 +268,19 @@ abstract class BaseItem {
   Map? segmentBase;
   int? codecid;
 
+  /// 大会员画质试看流: 拒绝 Web UA+Referer, 播放时需切换 App UA 且不可走 CDN 改写
+  bool isTrial = false;
+
+  /// 试看流优先走常规 CDN 镜像(mcdn 边缘节点为非标端口, 手机网络下易不可达)
+  String? get trialPlayUrl {
+    for (final url in [?baseUrl, ...?backupUrl]) {
+      if (Uri.parse(url).host.endsWith('bilivideo.com')) {
+        return url;
+      }
+    }
+    return baseUrl;
+  }
+
   BaseItem({
     required this.id,
     this.baseUrl,
@@ -299,6 +312,7 @@ abstract class BaseItem {
     startWithSap = json['startWithSap'] ?? json['start_with_sap'];
     segmentBase = json['segmentBase'] ?? json['segment_base'];
     codecid = json['codecid'];
+    isTrial = json['trial'] == true;
   }
 
   Iterable<String> get playUrls sync* {

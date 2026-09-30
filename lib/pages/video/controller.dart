@@ -9,6 +9,8 @@ import 'package:PiliPlus/common/widgets/scaffold/mini_scaffold.dart';
 import 'package:PiliPlus/grpc/bilibili/app/listener/v1.pbenum.dart'
     show PlaylistSource;
 import 'package:PiliPlus/grpc/dm.dart';
+import 'package:PiliPlus/grpc/play_url.dart';
+import 'package:PiliPlus/grpc/view.dart';
 import 'package:PiliPlus/http/browser_ua.dart';
 import 'package:PiliPlus/http/fav.dart';
 import 'package:PiliPlus/http/init.dart';
@@ -691,7 +693,9 @@ class VideoDetailController extends GetxController
       ..buffered.value = 0;
 
     firstVideo = findVideoByQa(currentVideoQa.code, setCodecs: true);
-    videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
+    videoUrl = firstVideo.isTrial
+        ? firstVideo.trialPlayUrl
+        : VideoUtils.getCdnUrl(firstVideo.playUrls);
 
     /// 根据currentAudioQa 重新设置audioUrl
     if (currentAudioQa != null) {
@@ -699,7 +703,9 @@ class VideoDetailController extends GetxController
         (i) => i.id == currentAudioQa!.code,
         orElse: () => data.dash!.audio!.first,
       );
-      audioUrl = VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
+      audioUrl = firstAudio.isTrial
+          ? firstAudio.trialPlayUrl
+          : VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
     }
 
     playerInit();
@@ -736,6 +742,7 @@ class VideoDetailController extends GetxController
           : NetworkSource(
               videoSource: videoUrl!,
               audioSource: audioUrl,
+              isTrial: firstVideo.isTrial,
             ),
       seekTo: seek,
       duration: data.timeLength == null
@@ -816,6 +823,79 @@ class VideoDetailController extends GetxController
     }
   }
 
+  static bool _vipQaTrialTipShown = false;
+  static bool _vipQaTrialDeniedTipShown = false;
+
+  /// 实验性：web 接口对非会员只下发 ≤1080P 的流，走 gRPC 试看通道可拿到
+  /// 官方试看策略下的大会员画质完整流（时长限制由客户端执行，此处不解析）
+  Future<void> _unlockVipQualities() async {
+    if (!Pref.enableVipQaTrial || !isLoginVideo || videoType != VideoType.ugc) {
+      return;
+    }
+    final videos = data.dash?.video;
+    final supportFormats = data.supportFormats;
+    if (videos == null || videos.isEmpty || supportFormats == null) return;
+    final available = videos.availableVideoQualities;
+    final missing = supportFormats
+        .map((f) => f.quality)
+        .whereType<int>()
+        .where((q) => q > 80 && !available.contains(q))
+        .toList()
+      ..sort((a, b) => b.compareTo(a));
+    if (missing.isEmpty) return;
+    final hasKey = Accounts.get(AccountType.video).accessKey?.isNotEmpty == true;
+    // 模拟官方流程: 先请求页面数据建立会话上下文
+    await ViewGrpc.view(bvid: bvid).then((_) {}, onError: (_) {});
+    // 依次尝试缺失的最高画质; 若未授予且 1080P高码率 缺失, 再单独尝试 112
+    final candidates = [missing.first, if (missing.contains(112) && missing.first != 112) 112];
+    for (final target in candidates) {
+      final result = await PlayUrlGrpc.playView(
+        aid: aid,
+        cid: cid.value,
+        qn: target,
+        bvid: bvid,
+      );
+      var granted = false;
+      switch (result) {
+        case Success(:final response):
+          final gDash = response.dash;
+          final gVideos = gDash?.video;
+          if (gVideos != null && gVideos.isNotEmpty) {
+            final prevHighest = videos.first.id;
+            videos.merge(gVideos);
+            if (data.dash!.audio == null) {
+              data.dash!.audio = gDash!.audio;
+            } else {
+              data.dash!.audio!.merge(gDash!.audio);
+            }
+            granted = videos.first.id > prevHighest;
+            if (granted && !_vipQaTrialTipShown) {
+              _vipQaTrialTipShown = true;
+              final added = videos
+                  .where((e) => e.id > prevHighest)
+                  .map((e) => VideoQuality.fromCode(e.id).shortDesc)
+                  .join('/');
+              SmartDialog.showToast('试看通道已解锁：$added');
+            }
+          }
+        case Error(:final errMsg):
+          SmartDialog.showToast(
+            '试看通道失败(qn=$target,key=${hasKey ? '有' : '无'}): ${errMsg ?? '未知错误'}',
+          );
+          return;
+        default:
+          return;
+      }
+      if (granted) return;
+    }
+    if (!_vipQaTrialDeniedTipShown) {
+      _vipQaTrialDeniedTipShown = true;
+      SmartDialog.showToast(
+        '试看未授予(key=${hasKey ? '有' : '无'}，仅本会话提示一次)',
+      );
+    }
+  }
+
   Volume? volume;
 
   // 视频链接
@@ -859,7 +939,10 @@ class VideoDetailController extends GetxController
 
     if (result case Success(:final response)) {
       data = response;
-      if (data.dash != null) await _supplementVideoQualities();
+      if (data.dash != null) {
+        await _unlockVipQualities();
+        await _supplementVideoQualities();
+      }
 
       languages.value = data.language?.items;
       currLang.value = data.curLanguage;
@@ -960,7 +1043,9 @@ class VideoDetailController extends GetxController
       );
       _setVideoHeight();
 
-      videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
+      videoUrl = firstVideo.isTrial
+          ? firstVideo.trialPlayUrl
+          : VideoUtils.getCdnUrl(firstVideo.playUrls);
 
       /// 优先顺序 设置中指定质量 -> 当前可选的最高质量
       AudioItem? firstAudio;
@@ -979,7 +1064,9 @@ class VideoDetailController extends GetxController
           (e) => e.id == closestNumber,
           orElse: () => audioList.first,
         );
-        audioUrl = VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
+        audioUrl = firstAudio.isTrial
+            ? firstAudio.trialPlayUrl
+            : VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
         currentAudioQa = AudioQuality.fromCode(firstAudio.id);
       } else {
         audioUrl = '';

@@ -59,6 +59,9 @@ class AccountManager extends Interceptor {
 
     if (isApp && options.responseType == ResponseType.bytes) {
       options.headers.addAll(account.grpcHeaders);
+      if (options.extra['grpcHeaders'] case final Map<String, String> extra) {
+        options.headers.addAll(extra);
+      }
       return handler.next(options);
     }
 

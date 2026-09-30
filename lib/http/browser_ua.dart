@@ -8,4 +8,10 @@ abstract final class BrowserUa {
 
   static const mob =
       'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.101 Mobile Safari/537.36';
+
+  /// 官方手机客户端 UA(试看流拒绝 Web UA+Referer 组合)
+  static const app =
+      'Mozilla/5.0 BiliDroid/8.43.0 (bbcallen@gmail.com) os/android '
+      'model/M2012K11AC mobi_app/android build/8430300 channel/master '
+      'innerVer/8430300 osVer/15 network/2';
 }
